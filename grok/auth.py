@@ -71,6 +71,14 @@ class APIKeyManager:
                 self._save_keys()
                 return True
             return False
+
+    def delete_key(self, key: str) -> bool:
+        with self._lock:
+            if key in self._keys:
+                del self._keys[key]
+                self._save_keys()
+                return True
+            return False
     
     def list_keys(self) -> List[dict]:
         with self._lock:
