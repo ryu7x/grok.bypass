@@ -304,8 +304,8 @@ async def image_generations(req: Request, request: ImageGenerationRequest, autho
 
 
 @app.get("/v1/images/proxy/{image_id}")
-async def proxy_image(image_id: str, authorization: Optional[str] = Header(None)):
-    verify_api_key(authorization)
+async def proxy_image(image_id: str):
+    # Public endpoint for image embedding - no auth required for GET
     """Proxy endpoint that fetches images from assets.grok.com using cached session cookies."""
     entry = _image_cache.get(image_id)
     if not entry:
