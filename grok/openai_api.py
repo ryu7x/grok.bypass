@@ -47,10 +47,12 @@ MODELS = {
     "grok-3-auto": {"id": "grok-3-auto", "object": "model", "created": 1700000000, "owned_by": "xai"},
     "grok-3-fast": {"id": "grok-3-fast", "object": "model", "created": 1700000000, "owned_by": "xai"},
     "grok-4": {"id": "grok-4", "object": "model", "created": 1700000000, "owned_by": "xai"},
+    "grok-4-mini": {"id": "grok-4-mini", "object": "model", "created": 1700000000, "owned_by": "xai"},
     "gpt-3.5-turbo": {"id": "gpt-3.5-turbo", "object": "model", "created": 1700000000, "owned_by": "xai", "alias": "grok-3-auto"},
     "gpt-4": {"id": "gpt-4", "object": "model", "created": 1700000000, "owned_by": "xai", "alias": "grok-3-auto"},
     "gpt-4-turbo": {"id": "gpt-4-turbo", "object": "model", "created": 1700000000, "owned_by": "xai", "alias": "grok-4"},
     "gpt-4o": {"id": "gpt-4o", "object": "model", "created": 1700000000, "owned_by": "xai", "alias": "grok-4"},
+    "gpt-4-mini": {"id": "gpt-4-mini", "object": "model", "created": 1700000000, "owned_by": "xai", "alias": "grok-4-mini"},
 }
 
 
@@ -109,7 +111,7 @@ def verify_api_key(authorization: Optional[str] = Header(None)) -> bool:
 def resolve_model(model: str) -> str:
     if model in MODELS and "alias" in MODELS[model]:
         return MODELS[model]["alias"]
-    return model if model in ["grok-3-auto", "grok-3-fast", "grok-4"] else "grok-3-auto"
+    return model if model in ["grok-3-auto", "grok-3-fast", "grok-4", "grok-4-mini"] else "grok-3-auto"
 
 
 def create_chat_completion_response(response: str, model: str, stream: bool = False) -> dict:
