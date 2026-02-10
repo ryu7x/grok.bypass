@@ -90,6 +90,10 @@ class ImageGenerationRequest(BaseModel):
     response_format: Optional[str] = "url"
 
 
+class KeyDeleteRequest(BaseModel):
+    key: str
+
+
 def verify_api_key(authorization: Optional[str] = Header(None)) -> bool:
     if not authorization:
         raise HTTPException(status_code=401, detail={"error": {"message": "Missing API key", "type": "invalid_request_error", "code": "missing_api_key"}})
@@ -372,6 +376,15 @@ async def generate_key(name: str = "default", authorization: Optional[str] = Hea
         verify_api_key(authorization)
     key = key_manager.generate_key(name)
     return {"key": key, "name": name, "message": "Store this key securely, it won't be shown again"}
+
+
+@app.delete("/v1/keys")
+async def delete_key_endpoint(request: KeyDeleteRequest, authorization: Optional[str] = Header(None)):
+    verify_api_key(authorization)
+    key_manager = get_key_manager()
+    if key_manager.delete_key(request.key):
+        return {"status": "success", "message": "Key deleted"}
+    raise HTTPException(status_code=404, detail="Key not found")
 
 
 @app.get("/")
