@@ -1,10 +1,10 @@
 {
   "keys": {
-    "grok-sk-2efe034e8259ac0df84bc9e683c09235c9bc5bc11bea53d18acbbe96218923c2": {
-      "name": "default",
-      "created_at": 1770666055,
-      "requests": 6,
-      "last_used": 1770666636,
+    "grok-sk-169ce0bba91d0cddbe1ac1885ccaee1b1992ed7e28e4b3e962865c3345a735f5": {
+      "name": "discord-bot",
+      "created_at": 1770666339,
+      "requests": 0,
+      "last_used": null,
       "active": true
     }
   }
