@@ -91,7 +91,8 @@ class ImageGenerationRequest(BaseModel):
 
 
 class KeyDeleteRequest(BaseModel):
-    key: str
+    key: Optional[str] = None
+    name: Optional[str] = None
 
 
 def verify_api_key(authorization: Optional[str] = Header(None)) -> bool:
@@ -382,8 +383,14 @@ async def generate_key(name: str = "default", authorization: Optional[str] = Hea
 async def delete_key_endpoint(request: KeyDeleteRequest, authorization: Optional[str] = Header(None)):
     verify_api_key(authorization)
     key_manager = get_key_manager()
-    if key_manager.delete_key(request.key):
-        return {"status": "success", "message": "Key deleted"}
+    
+    if request.key:
+        if key_manager.delete_key(request.key):
+            return {"status": "success", "message": "Key deleted"}
+    elif request.name:
+        if key_manager.delete_key_by_name(request.name):
+            return {"status": "success", "message": f"Key with name '{request.name}' deleted"}
+            
     raise HTTPException(status_code=404, detail="Key not found")
 
 
