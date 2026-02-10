@@ -1,0 +1,11 @@
+{
+  "keys": {
+    "grok-sk-2efe034e8259ac0df84bc9e683c09235c9bc5bc11bea53d18acbbe96218923c2": {
+      "name": "default",
+      "created_at": 1770666055,
+      "requests": 6,
+      "last_used": 1770666636,
+      "active": true
+    }
+  }
+}
