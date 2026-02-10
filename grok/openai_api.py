@@ -1,11 +1,13 @@
 from fastapi import FastAPI, HTTPException, Header, Request
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any, Union
 from time import time
 from secrets import token_hex
+from hashlib import md5
 from grok import GrokManager, Log
 from grok.auth import get_key_manager
+from curl_cffi import requests as curl_requests
 import json
 
 
@@ -13,6 +15,32 @@ CDN_BASE = "https://assets.grok.com/"
 
 app = FastAPI(title="Grok OpenAI Compatible API", version="1.0.0")
 manager = GrokManager(pool_size=8, max_workers=4, max_retries=4, base_delay=0.8)
+
+# Image proxy cache: stores {image_id: {"url": full_url, "cookies": {...}, "created": timestamp}}
+_image_cache: Dict[str, Dict[str, Any]] = {}
+
+
+def _cache_images(image_paths: list, cookies: dict = None, base_url: str = "") -> list:
+    """Cache image URLs with cookies and return proxy URLs."""
+    proxied = []
+    for img_path in (image_paths or []):
+        full_url = img_path if img_path.startswith("http") else f"{CDN_BASE}{img_path}"
+        image_id = md5(full_url.encode()).hexdigest()[:16]
+        _image_cache[image_id] = {
+            "url": full_url,
+            "cookies": cookies or {},
+            "created": time(),
+        }
+        proxy_url = f"{base_url}/v1/images/proxy/{image_id}"
+        proxied.append(proxy_url)
+    return proxied
+
+
+def _get_base_url(request: Request) -> str:
+    """Build the public base URL from the incoming request."""
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+    host = request.headers.get("x-forwarded-host", request.headers.get("host", request.url.netloc))
+    return f"{scheme}://{host}"
 
 
 MODELS = {
@@ -135,7 +163,7 @@ async def get_model(model_id: str, authorization: Optional[str] = Header(None)):
 
 
 @app.post("/v1/chat/completions")
-async def chat_completions(request: ChatCompletionRequest, authorization: Optional[str] = Header(None)):
+async def chat_completions(req: Request, request: ChatCompletionRequest, authorization: Optional[str] = Header(None)):
     verify_api_key(authorization)
     
     model = resolve_model(request.model)
@@ -164,12 +192,14 @@ async def chat_completions(request: ChatCompletionRequest, authorization: Option
     
     response_text = result.get("response", "")
     
-    # Append image URLs directly into the response text as markdown
+    # Append image URLs as proxied markdown links
     images = result.get("images", [])
     if images:
+        cookies = result.get("extra_data", {}).get("cookies", {})
+        base_url = _get_base_url(req)
+        proxy_urls = _cache_images(images, cookies=cookies, base_url=base_url)
         image_md = "\n\n"
-        for i, img_path in enumerate(images):
-            url = f"https://assets.grok.com/{img_path}" if not img_path.startswith("http") else img_path
+        for i, url in enumerate(proxy_urls):
             image_md += f"![image_{i+1}]({url})\n"
         response_text += image_md
     
@@ -238,7 +268,7 @@ async def completions(request: CompletionRequest, authorization: Optional[str] =
 
 
 @app.post("/v1/images/generations")
-async def image_generations(request: ImageGenerationRequest, authorization: Optional[str] = Header(None)):
+async def image_generations(req: Request, request: ImageGenerationRequest, authorization: Optional[str] = Header(None)):
     verify_api_key(authorization)
     
     result = manager.generate_images(request.prompt)
@@ -254,15 +284,64 @@ async def image_generations(request: ImageGenerationRequest, authorization: Opti
             raise HTTPException(status_code=500, detail={"error": {"message": msg, "type": "server_error"}})
     
     images = result.get("images", [])
-    image_data = []
-    for img_path in images:
-        url = f"{CDN_BASE}{img_path}" if not img_path.startswith("http") else img_path
-        image_data.append({"url": url, "revised_prompt": request.prompt})
+    cookies = result.get("extra_data", {}).get("cookies", {})
+    base_url = _get_base_url(req)
+    proxy_urls = _cache_images(images, cookies=cookies, base_url=base_url)
+    
+    image_data = [{"url": url, "revised_prompt": request.prompt} for url in proxy_urls]
     
     return {
         "created": int(time()),
         "data": image_data
     }
+
+
+@app.get("/v1/images/proxy/{image_id}")
+async def proxy_image(image_id: str):
+    """Proxy endpoint that fetches images from assets.grok.com using cached session cookies."""
+    entry = _image_cache.get(image_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Image not found or expired")
+    
+    # Clean up old entries (older than 30 minutes)
+    cutoff = time() - 1800
+    expired = [k for k, v in _image_cache.items() if v["created"] < cutoff]
+    for k in expired:
+        _image_cache.pop(k, None)
+    
+    try:
+        session = curl_requests.Session(impersonate="chrome136")
+        if entry["cookies"]:
+            session.cookies.update(entry["cookies"])
+        
+        headers = {
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+            "accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+            "accept-encoding": "gzip, deflate, br",
+            "referer": "https://grok.com/",
+            "sec-fetch-dest": "image",
+            "sec-fetch-mode": "no-cors",
+            "sec-fetch-site": "same-site",
+        }
+        
+        resp = session.get(entry["url"], headers=headers, timeout=30)
+        
+        if resp.status_code != 200:
+            raise HTTPException(status_code=502, detail=f"Upstream returned {resp.status_code}")
+        
+        content_type = resp.headers.get("content-type", "image/jpeg")
+        return Response(
+            content=resp.content,
+            media_type=content_type,
+            headers={
+                "Cache-Control": "public, max-age=3600",
+                "Access-Control-Allow-Origin": "*",
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch image: {str(e)}")
 
 
 @app.post("/v1/embeddings")
