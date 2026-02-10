@@ -1,23 +1,96 @@
 import threading
-from fastapi      import FastAPI, HTTPException
+from fastapi      import FastAPI, HTTPException, Request
 from pydantic     import BaseModel
 from typing       import Optional, List
 from grok         import Log, GrokManager, ImageDownloader
 from uvicorn      import run
 
 
+from hashlib import md5
+from fastapi.responses import Response
+from curl_cffi import requests as curl_requests
+from typing import Dict, Any
+
 CDN_BASE = "https://assets.grok.com/"
 
 app = FastAPI(title="Grok API", version="2.0.0")
 manager = GrokManager(pool_size=8, max_workers=4, max_retries=4, base_delay=0.8)
 
+# Image proxy cache: {image_id: {"url": full_url, "cookies": {...}, "created": timestamp}}
+_image_cache: Dict[str, Dict[str, Any]] = {}
 
-def _to_cdn_urls(image_paths: list) -> list:
-    """Convert Grok image paths to full CDN URLs."""
-    return [
-        img if img.startswith("http") else f"{CDN_BASE}{img}"
-        for img in (image_paths or [])
-    ]
+
+def _cache_images(image_paths: list, cookies: dict = None, base_url: str = "") -> list:
+    """Cache image URLs with session cookies and return proxy URLs."""
+    from time import time as _time
+    proxied = []
+    for img_path in (image_paths or []):
+        full_url = img_path if img_path.startswith("http") else f"{CDN_BASE}{img_path}"
+        image_id = md5(full_url.encode()).hexdigest()[:16]
+        _image_cache[image_id] = {
+            "url": full_url,
+            "cookies": cookies or {},
+            "created": _time(),
+        }
+        proxy_url = f"{base_url}/v1/images/proxy/{image_id}"
+        proxied.append(proxy_url)
+    return proxied
+
+
+def _get_base_url(request: Request) -> str:
+    """Build the public base URL from the incoming request."""
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+    host = request.headers.get("x-forwarded-host", request.headers.get("host", request.url.netloc))
+    return f"{scheme}://{host}"
+
+
+@app.get("/v1/images/proxy/{image_id}")
+async def proxy_image(image_id: str):
+    """Proxy that fetches images from assets.grok.com using cached session cookies."""
+    from time import time as _time
+    entry = _image_cache.get(image_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Image not found or expired")
+    
+    # Clean up old entries (older than 30 minutes)
+    cutoff = _time() - 1800
+    expired = [k for k, v in _image_cache.items() if v["created"] < cutoff]
+    for k in expired:
+        _image_cache.pop(k, None)
+    
+    try:
+        session = curl_requests.Session(impersonate="chrome136")
+        if entry["cookies"]:
+            session.cookies.update(entry["cookies"])
+        
+        headers = {
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+            "accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+            "accept-encoding": "gzip, deflate, br",
+            "referer": "https://grok.com/",
+            "sec-fetch-dest": "image",
+            "sec-fetch-mode": "no-cors",
+            "sec-fetch-site": "same-site",
+        }
+        
+        resp = session.get(entry["url"], headers=headers, timeout=30)
+        
+        if resp.status_code != 200:
+            raise HTTPException(status_code=502, detail=f"Upstream returned {resp.status_code}")
+        
+        content_type = resp.headers.get("content-type", "image/jpeg")
+        return Response(
+            content=resp.content,
+            media_type=content_type,
+            headers={
+                "Cache-Control": "public, max-age=3600",
+                "Access-Control-Allow-Origin": "*",
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch image: {str(e)}")
 
 
 class ConversationRequest(BaseModel):
@@ -33,7 +106,7 @@ class ImageRequest(BaseModel):
 
 
 @app.post("/ask")
-async def create_conversation(request: ConversationRequest):
+async def create_conversation(req: Request, request: ConversationRequest):
     if not request.message:
         raise HTTPException(status_code=400, detail="Message is required")
     
@@ -53,10 +126,15 @@ async def create_conversation(request: ConversationRequest):
         if "error" in answer and not answer.get("retry"):
             raise HTTPException(status_code=500, detail=answer.get("message", "Unknown error"))
         
+        images = answer.get("images", [])
+        cookies = answer.get("extra_data", {}).get("cookies", {})
+        base_url = _get_base_url(req)
+        proxy_urls = _cache_images(images, cookies=cookies, base_url=base_url) if images else []
+        
         return {
             "status": "success",
             "response": answer.get("response"),
-            "images": _to_cdn_urls(answer.get("images")),
+            "images": proxy_urls,
             "conversation_id": answer.get("extra_data", {}).get("conversationId")
         }
     except HTTPException:
@@ -66,15 +144,20 @@ async def create_conversation(request: ConversationRequest):
 
 
 @app.post("/generate")
-async def generate_image(request: ImageRequest):
+async def generate_image(req: Request, request: ImageRequest):
     try:
         answer = manager.generate_images(prompt=request.prompt, model=request.model)
         if "error" in answer:
             raise HTTPException(status_code=500, detail=answer.get("message"))
         
+        images = answer.get("images", [])
+        cookies = answer.get("extra_data", {}).get("cookies", {})
+        base_url = _get_base_url(req)
+        proxy_urls = _cache_images(images, cookies=cookies, base_url=base_url) if images else []
+        
         return {
             "status": "success",
-            "images": _to_cdn_urls(answer.get("images")),
+            "images": proxy_urls,
             "response": answer.get("response")
         }
     except Exception as e:
