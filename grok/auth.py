@@ -72,6 +72,20 @@ class APIKeyManager:
                 return True
             return False
 
+    def delete_key_by_name(self, name: str) -> bool:
+        with self._lock:
+            key_to_delete = None
+            for key, data in self._keys.items():
+                if data.get("name") == name:
+                    key_to_delete = key
+                    break
+            
+            if key_to_delete:
+                del self._keys[key_to_delete]
+                self._save_keys()
+                return True
+            return False
+
     def delete_key(self, key: str) -> bool:
         with self._lock:
             if key in self._keys:
