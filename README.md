@@ -7,7 +7,7 @@ A reverse-engineered API for [Grok](https://grok.com) that provides an **OpenAI-
 - **OpenAI-Compatible API** — Drop-in replacement for OpenAI's `/v1/chat/completions` and `/v1/images/generations`
 - **Session Pooling** — Multiple browser sessions with automatic rotation and fingerprint randomization
 - **Rate Limit Bypass** — Smart backoff, session recycling, and cooldown management
-- **Image Generation** — Generate images via Grok and get direct CDN URLs
+- **Image Generation** — Generate images via Grok with automatic proxying (no 403 errors)
 - **Terminal Chat** — Interactive CLI for chatting with Grok directly
 - **Conversation Memory** — Continue multi-turn conversations via `conversation_id`
 - **Anti-Bot Evasion** — Cloudflare cookie management, challenge solving, and browser impersonation
