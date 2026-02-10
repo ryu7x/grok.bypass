@@ -55,8 +55,8 @@ def verify_api_key(authorization: Optional[str] = Header(None)) -> bool:
 
 
 @app.get("/v1/images/proxy/{image_id}")
-async def proxy_image(image_id: str, authorization: Optional[str] = Header(None)):
-    verify_api_key(authorization)
+async def proxy_image(image_id: str):
+    # Public endpoint for image embedding
     """Proxy that fetches images from assets.grok.com using cached session cookies."""
     from time import time as _time
     entry = _image_cache.get(image_id)
