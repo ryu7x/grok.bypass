@@ -297,7 +297,8 @@ async def image_generations(req: Request, request: ImageGenerationRequest, autho
 
 
 @app.get("/v1/images/proxy/{image_id}")
-async def proxy_image(image_id: str):
+async def proxy_image(image_id: str, authorization: Optional[str] = Header(None)):
+    verify_api_key(authorization)
     """Proxy endpoint that fetches images from assets.grok.com using cached session cookies."""
     entry = _image_cache.get(image_id)
     if not entry:
@@ -364,8 +365,11 @@ async def list_keys(authorization: Optional[str] = Header(None)):
 
 
 @app.post("/v1/keys/generate")
-async def generate_key(name: str = "default"):
+async def generate_key(name: str = "default", authorization: Optional[str] = Header(None)):
     key_manager = get_key_manager()
+    # Allow first key generation when no keys exist yet (bootstrap)
+    if key_manager.get_key_count() > 0:
+        verify_api_key(authorization)
     key = key_manager.generate_key(name)
     return {"key": key, "name": name, "message": "Store this key securely, it won't be shown again"}
 
