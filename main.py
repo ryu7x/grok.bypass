@@ -1,8 +1,9 @@
 import threading
-from fastapi      import FastAPI, HTTPException, Request
+from fastapi      import FastAPI, HTTPException, Request, Header
 from pydantic     import BaseModel
 from typing       import Optional, List
 from grok         import Log, GrokManager, ImageDownloader
+from grok.auth    import get_key_manager
 from uvicorn      import run
 
 
@@ -44,8 +45,18 @@ def _get_base_url(request: Request) -> str:
     return f"{scheme}://{host}"
 
 
+def verify_api_key(authorization: Optional[str] = Header(None)) -> bool:
+    if not authorization:
+        raise HTTPException(status_code=401, detail={"error": {"message": "Missing API key", "type": "invalid_request_error", "code": "missing_api_key"}})
+    key_manager = get_key_manager()
+    if not key_manager.validate_key(authorization):
+        raise HTTPException(status_code=401, detail={"error": {"message": "Invalid API key", "type": "invalid_request_error", "code": "invalid_api_key"}})
+    return True
+
+
 @app.get("/v1/images/proxy/{image_id}")
-async def proxy_image(image_id: str):
+async def proxy_image(image_id: str, authorization: Optional[str] = Header(None)):
+    verify_api_key(authorization)
     """Proxy that fetches images from assets.grok.com using cached session cookies."""
     from time import time as _time
     entry = _image_cache.get(image_id)
@@ -106,7 +117,8 @@ class ImageRequest(BaseModel):
 
 
 @app.post("/ask")
-async def create_conversation(req: Request, request: ConversationRequest):
+async def create_conversation(req: Request, request: ConversationRequest, authorization: Optional[str] = Header(None)):
+    verify_api_key(authorization)
     if not request.message:
         raise HTTPException(status_code=400, detail="Message is required")
     
@@ -144,7 +156,8 @@ async def create_conversation(req: Request, request: ConversationRequest):
 
 
 @app.post("/generate")
-async def generate_image(req: Request, request: ImageRequest):
+async def generate_image(req: Request, request: ImageRequest, authorization: Optional[str] = Header(None)):
+    verify_api_key(authorization)
     try:
         answer = manager.generate_images(prompt=request.prompt, model=request.model)
         if "error" in answer:
@@ -165,18 +178,21 @@ async def generate_image(req: Request, request: ImageRequest):
 
 
 @app.get("/stats")
-async def get_stats():
+async def get_stats(authorization: Optional[str] = Header(None)):
+    verify_api_key(authorization)
     return manager.get_stats()
 
 
 @app.post("/refresh")
-async def refresh_pool():
+async def refresh_pool(authorization: Optional[str] = Header(None)):
+    verify_api_key(authorization)
     manager.refresh_pool()
     return {"status": "success"}
 
 
 @app.get("/conversation/{conversation_id}")
-async def get_conversation(conversation_id: str):
+async def get_conversation(conversation_id: str, authorization: Optional[str] = Header(None)):
+    verify_api_key(authorization)
     conv = manager.get_conversation(conversation_id)
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
