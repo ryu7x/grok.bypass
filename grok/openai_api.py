@@ -424,12 +424,6 @@ def run_openai_server(host: str = "0.0.0.0", port: int = 8080):
             Log.Info(f"First run - generated API key: {key}")
     
     with Log.Context("Server"):
-        from os.path import exists
-        if exists("grok/mappings/cookies.json"):
-            Log.Success("Persistent Storage: Active (cookies.json found)")
-        else:
-            Log.Info("Persistent Storage: Initializing...")
-            
         Log.Info(f"Starting on http://{host}:{port}")
         Log.Info("Endpoints: /v1/chat/completions, /v1/images/generations, /v1/models")
     

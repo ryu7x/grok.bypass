@@ -191,20 +191,21 @@ class SessionPool:
             pass
 
     def extract_cf_cookies(self, session: requests.Session) -> None:
-        """Extract ALL cookies from any session response — success or failure."""
+        """Extract CF cookies from any session response — success or failure."""
         try:
             cookies = session.cookies.get_dict()
-            if cookies:
+            cf = {k: v for k, v in cookies.items() if k in CF_COOKIE_KEYS or k.startswith('cf_')}
+            if cf:
                 old = self._cf_cookies.copy()
-                self._cf_cookies.update(cookies)
-                if cookies != old:
+                self._cf_cookies.update(cf)
+                if cf != old:
                     self._stats["cookie_refreshes"] += 1
                 self._save_cookies()
         except Exception:
             pass
 
     def warmup(self) -> None:
-        """Pre-fetch cookies with an initial GET to grok.com."""
+        """Pre-fetch CF cookies with an initial GET to grok.com."""
         try:
             fp = Fingerprints.random()
             session = requests.Session(impersonate=fp.impersonate, default_headers=False)
@@ -217,16 +218,16 @@ class SessionPool:
             headers.update(fp.to_headers())
             session.headers = headers
             
-            # First hit to main page to get initial cookies
             resp = session.get('https://grok.com/', timeout=15)
             
-            # Extract whatever we got
-            self.extract_cf_cookies(session)
-            
-            if self._cf_cookies:
-               Log.Success(f"Warmup complete, saved {len(self._cf_cookies)} cookies to disk")
+            cookies = session.cookies.get_dict()
+            cf = {k: v for k, v in cookies.items() if k in CF_COOKIE_KEYS or k.startswith('cf_')}
+            if cf:
+                self._cf_cookies.update(cf)
+                self._save_cookies()
+                Log.Success(f"Warmup complete, got {len(cf)} CF cookie(s)")
             else:
-               Log.Warning("Warmup done, no cookies received")
+                Log.Warning("Warmup done, no CF cookies received")
                 
         except Exception as e:
             Log.Warning(f"Warmup failed: {e}")
