@@ -1,7 +1,7 @@
 {
   "keys": {
     "grok-sk-169ce0bba91d0cddbe1ac1885ccaee1b1992ed7e28e4b3e962865c3345a735f5": {
-      "name": "discord-bot",
+      "name": "ryuu",
       "created_at": 1770666339,
       "requests": 0,
       "last_used": null,
@@ -9,3 +9,4 @@
     }
   }
 }
+
