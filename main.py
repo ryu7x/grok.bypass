@@ -61,6 +61,7 @@ async def proxy_image(image_id: str):
     from time import time as _time
     entry = _image_cache.get(image_id)
     if not entry:
+        
         raise HTTPException(status_code=404, detail="Image not found or expired")
     
     # Clean up old entries (older than 30 minutes)
